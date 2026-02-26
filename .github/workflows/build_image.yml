@@ -1,0 +1,37 @@
+name: Build, Image Scan, SBOM
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t starter:${{ github.sha }} .
+
+      - name: Trivy image scan (fail on High/Critical)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: starter:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Generate SBOM (Syft CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: starter:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.cdx.json

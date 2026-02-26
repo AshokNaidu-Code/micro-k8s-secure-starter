@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-starter
+  labels:
+    app: secure-starter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secure-starter
+  template:
+    metadata:
+      labels:
+        app: secure-starter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+      containers:
+        - name: app
+          image: secure-starter:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            runAsUser: 10001 
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-starter
+spec:
+  selector:
+    app: secure-starter
+  ports:
+    - port: 80
+      targetPort: 8000
