@@ -1,0 +1,79 @@
+name: Build, Scan, SBOM, Push to GHCR + Keyless Sign
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write        # Keyless signing requirement
+
+env:
+  IMAGE_NAME: ghcr.io/${{ AshokNaidu-Code }}/micro-k8s-secure-starter
+  TAG: ${{ github.sha }}
+
+jobs:
+  supply_chain_pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t $IMAGE_NAME:$TAG .
+          docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:latest
+
+      - name: Trivy Image Scan (Fail on High/Critical)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.TAG }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ env.TAG }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ env.TAG }}
+          path: sbom.cdx.json
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        run: |
+          docker push $IMAGE_NAME:$TAG
+          docker push $IMAGE_NAME:latest
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@main
+
+      - name: Keyless Sign image (Cosign)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes $IMAGE_NAME:$TAG
+          cosign sign --yes $IMAGE_NAME:latest
+
+      - name: Verify signatures
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign verify $IMAGE_NAME:$TAG
+          cosign verify $IMAGE_NAME:latest
